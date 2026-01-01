@@ -14,7 +14,8 @@ import * as places from './placesService.js';
 
 // Configuration
 const GRID_SIZE = 5; // 5x5 grid = 25 candidate points
-const INITIAL_RADIUS_KM = 10; // Initial search radius
+const COARSE_RADIUS_KM = 20; // Coarse pass search radius
+const FINE_RADIUS_KM = 3; // Fine pass search radius (refinement around best coarse candidates)
 const VENUE_SEARCH_RADIUS_METERS = 3000; // Search venues within 3km of best point
 const MAX_VENUES = 10; // Return top 10 venues
 
@@ -339,7 +340,9 @@ async function rankVenues(
 }
 
 /**
- * Main algorithm: Find the best meeting venues
+ * Main algorithm: Find the best meeting venues using two-pass refinement
+ * Pass 1 (Coarse): Large grid to find promising regions
+ * Pass 2 (Fine): Small grid around top candidates to avoid local minima
  */
 export async function findTimeMiddle(
   participants: Participant[],
@@ -348,23 +351,24 @@ export async function findTimeMiddle(
   venues: RankedVenue[];
   searchArea: { center: LatLng; radiusMeters: number };
 }> {
+  const participantNames = participants.map(p => p.name);
+
   // Step 1: Compute geographic centroid
   const centroid = computeCentroid(participants);
 
-  // Step 2: Generate candidate grid
-  const candidates = generateCandidateGrid(centroid, INITIAL_RADIUS_KM, GRID_SIZE);
+  // Step 2a: COARSE PASS - Generate wide grid to find promising regions
+  const coarseCandidates = generateCandidateGrid(centroid, COARSE_RADIUS_KM, GRID_SIZE);
 
-  // Step 3: Compute travel times from all participants to all candidates
-  const travelTimes = await computeTravelTimes(participants, candidates);
+  // Step 3a: Compute travel times for coarse candidates
+  const coarseTravelTimes = await computeTravelTimes(participants, coarseCandidates);
 
-  // Step 4: Score candidates
-  const participantNames = participants.map(p => p.name);
-  const scoredCandidates = scoreCandidates(candidates, travelTimes, participantNames);
+  // Step 4a: Score coarse candidates
+  const scoredCoarseCandidates = scoreCandidates(coarseCandidates, coarseTravelTimes, participantNames);
 
-  // Step 5: Select best candidate area
-  const bestCandidates = selectBestCandidates(scoredCandidates, 3);
+  // Step 5a: Select top 3 coarse candidates for refinement
+  const topCoarseCandidates = selectBestCandidates(scoredCoarseCandidates, 3);
 
-  if (bestCandidates.length === 0) {
+  if (topCoarseCandidates.length === 0) {
     // Fallback to centroid if no valid candidates
     const googleType = places.getGooglePlaceType(intent.category);
     const venues = await places.searchPlaces({
@@ -382,8 +386,33 @@ export async function findTimeMiddle(
     };
   }
 
-  // Use the best candidate's location for venue search
-  const bestPoint = bestCandidates[0].location;
+  // Step 2b: FINE PASS - Generate smaller grids around each top coarse candidate
+  const fineCandidates: LatLng[] = [];
+  for (const coarseCandidate of topCoarseCandidates) {
+    const localGrid = generateCandidateGrid(coarseCandidate.location, FINE_RADIUS_KM, GRID_SIZE);
+    fineCandidates.push(...localGrid);
+  }
+
+  // Remove duplicate points (can happen at grid edges)
+  const uniqueFineCandidates = fineCandidates.filter((candidate, index, self) =>
+    index === self.findIndex(c =>
+      Math.abs(c.lat - candidate.lat) < 0.0001 && Math.abs(c.lng - candidate.lng) < 0.0001
+    )
+  );
+
+  // Step 3b: Compute travel times for fine candidates
+  const fineTravelTimes = await computeTravelTimes(participants, uniqueFineCandidates);
+
+  // Step 4b: Score fine candidates
+  const scoredFineCandidates = scoreCandidates(uniqueFineCandidates, fineTravelTimes, participantNames);
+
+  // Step 5b: Select the single best refined candidate
+  const bestCandidates = selectBestCandidates(scoredFineCandidates, 1);
+
+  // Use the best refined candidate's location for venue search
+  const bestPoint = bestCandidates.length > 0
+    ? bestCandidates[0].location
+    : topCoarseCandidates[0].location;
 
   // Step 6: Search for venues near the best point
   const googleType = places.getGooglePlaceType(intent.category);
