@@ -124,8 +124,14 @@ export async function getDirections(
   }
 }
 
+// GeoJSON Polygon type (simplified)
+interface GeoJSONPolygon {
+  type: 'Polygon';
+  coordinates: number[][][];
+}
+
 export interface IsochroneResult {
-  geometry: GeoJSON.Polygon;
+  geometry: GeoJSONPolygon;
   center: LatLng;
   range: number; // seconds
 }
