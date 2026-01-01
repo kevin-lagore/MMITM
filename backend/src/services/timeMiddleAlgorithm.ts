@@ -386,25 +386,15 @@ export async function findTimeMiddle(
     };
   }
 
-  // Step 2b: FINE PASS - Generate smaller grids around each top coarse candidate
-  const fineCandidates: LatLng[] = [];
-  for (const coarseCandidate of topCoarseCandidates) {
-    const localGrid = generateCandidateGrid(coarseCandidate.location, FINE_RADIUS_KM, GRID_SIZE);
-    fineCandidates.push(...localGrid);
-  }
-
-  // Remove duplicate points (can happen at grid edges)
-  const uniqueFineCandidates = fineCandidates.filter((candidate, index, self) =>
-    index === self.findIndex(c =>
-      Math.abs(c.lat - candidate.lat) < 0.0001 && Math.abs(c.lng - candidate.lng) < 0.0001
-    )
-  );
+  // Step 2b: FINE PASS - Generate smaller grid around the single best coarse candidate
+  const bestCoarseCandidate = topCoarseCandidates[0];
+  const fineCandidates = generateCandidateGrid(bestCoarseCandidate.location, FINE_RADIUS_KM, GRID_SIZE);
 
   // Step 3b: Compute travel times for fine candidates
-  const fineTravelTimes = await computeTravelTimes(participants, uniqueFineCandidates);
+  const fineTravelTimes = await computeTravelTimes(participants, fineCandidates);
 
   // Step 4b: Score fine candidates
-  const scoredFineCandidates = scoreCandidates(uniqueFineCandidates, fineTravelTimes, participantNames);
+  const scoredFineCandidates = scoreCandidates(fineCandidates, fineTravelTimes, participantNames);
 
   // Step 5b: Select the single best refined candidate
   const bestCandidates = selectBestCandidates(scoredFineCandidates, 1);
