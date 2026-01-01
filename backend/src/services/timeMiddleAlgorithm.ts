@@ -390,6 +390,9 @@ export async function findTimeMiddle(
   const bestCoarseCandidate = topCoarseCandidates[0];
   const fineCandidates = generateCandidateGrid(bestCoarseCandidate.location, FINE_RADIUS_KM, GRID_SIZE);
 
+  // Brief delay to avoid ORS rate limiting between passes
+  await new Promise(resolve => setTimeout(resolve, 1500));
+
   // Step 3b: Compute travel times for fine candidates
   const fineTravelTimes = await computeTravelTimes(participants, fineCandidates);
 
